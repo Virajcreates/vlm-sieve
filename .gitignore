@@ -1,0 +1,45 @@
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Build, distribution, and packaging artifacts
+dist/
+build/
+*.egg-info/
+*.whl
+*.tar.gz
+
+# Python cache & test artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local IDE / Agent workspace state (keep .agent/rules.md tracked or untracked as preferred, ignore temp logs)
+.vscode/
+.idea/
+
+# Personal webcam & CLI output directories (STRICT PRIVACY LOCK)
+live_webcam_test/
+webcam_verified_v2/
+*webcam*/
+sieve_out/
+*test_out*/
+preview.jpg
+summary.json
+
+# Block all stray images and videos everywhere by default
+*.jpg
+*.jpeg
+*.png
+*.mp4
+*.avi
+*.mov
+
+# Explicitly whitelist ONLY the synthetic robotics showcase image
+!assets/
+!assets/demo_storyboard.jpg
