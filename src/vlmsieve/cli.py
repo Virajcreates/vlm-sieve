@@ -1,136 +1,139 @@
-"""Command-line interface (CLI) for vlm-sieve."""
-
+"""Command-line interface for vlm-sieve v0.2.0."""
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
+import sys
 
+from vlmsieve import __version__
 from vlmsieve.models import SieveConfig
 from vlmsieve.sieve import VideoSieve
 
 
-def parse_grid(grid_str: str) -> tuple[int, int]:
-    """Parse a grid dimension string in RxC format into a tuple (rows, cols).
-
-    Args:
-        grid_str: Grid layout string (e.g., '2x3').
-
-    Returns:
-        Tuple of (rows, cols) as positive integers.
-
-    Raises:
-        argparse.ArgumentTypeError: If string is malformed or dimensions <= 0.
-    """
-    parts = grid_str.lower().split("x")
-    if len(parts) != 2:
-        raise argparse.ArgumentTypeError(
-            f"Invalid grid format '{grid_str}'. Expected format: RxC (e.g. 2x3)"
-        )
+def parse_grid(value: str) -> tuple[int, int]:
     try:
-        r = int(parts[0].strip())
-        c = int(parts[1].strip())
-    except ValueError as err:
+        parts = value.strip().lower().split("x")
+        if len(parts) != 2:
+            raise ValueError
+        rows, cols = int(parts[0]), int(parts[1])
+        if rows < 1 or cols < 1:
+            raise ValueError
+        return rows, cols
+    except ValueError as exc:
         raise argparse.ArgumentTypeError(
-            f"Grid dimensions must be integers in '{grid_str}'"
-        ) from err
-
-    if r <= 0 or c <= 0:
-        raise argparse.ArgumentTypeError(f"Grid dimensions must be >= 1, got {r}x{c}")
-
-    return (r, c)
+            f"Invalid grid format '{value}'. Expected ROWSxCOLS, e.g., 2x3."
+        ) from exc
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Construct and configure the argparse ArgumentParser for vlmsieve."""
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="vlmsieve",
-        description="vlm-sieve: Event-driven video frame gatekeeper and storyboard packer for VLMs.",
+        description=(
+            "vlm-sieve: Local-first spatial-temporal video gatekeeper and "
+            "storyboard packer for Vision-Language Models."
+        ),
     )
     parser.add_argument(
         "source",
-        help="Path to video file, RTSP/HTTP stream URL, or camera index (e.g. 0)",
+        help="Path to a video file or integer webcam index (e.g. 0)",
     )
     parser.add_argument(
-        "--output-dir",
         "-o",
-        default="./sieve_out",
-        help="Output directory for generated storyboards and summary.json (default: ./sieve_out)",
+        "--output-dir",
+        default="sieve_output",
+        help="Directory to save storyboard JPEGs and summary.json (default: sieve_output)",
     )
     parser.add_argument(
         "--grid",
         type=parse_grid,
         default=(2, 3),
-        help="Storyboard grid layout RxC (default: 2x3)",
+        help="Storyboard grid layout as ROWSxCOLS (default: 2x3)",
     )
     parser.add_argument(
         "--threshold",
         type=float,
         default=0.015,
-        help="Motion score threshold for frame gating (default: 0.015)",
+        help="Motion fraction threshold in (0, 1] (default: 0.015)",
     )
     parser.add_argument(
-        "--no-crop",
-        action="store_true",
-        help="Disable active ROI auto-cropping (use full frames)",
+        "--sample-fps",
+        type=float,
+        default=10.0,
+        help="Target inspection FPS using bit-stream frame striding (default: 10.0)",
     )
     parser.add_argument(
-        "--spatial-grid",
-        action="store_true",
-        help="Enable 4x4 spatial grid coordinate overlay on tiles",
+        "--merge-gap-sec",
+        type=float,
+        default=6.0,
+        help="Merge motion bursts separated by <= N seconds (default: 6.0)",
+    )
+    parser.add_argument(
+        "--pre-roll-sec",
+        type=float,
+        default=3.0,
+        help="Pre-roll ring buffer duration in seconds (default: 3.0)",
+    )
+    parser.add_argument(
+        "--tile-max-dim",
+        type=int,
+        default=640,
+        help="Maximum pixel dimension (width or height) per tile (default: 640)",
     )
     parser.add_argument(
         "--max-frames",
         type=int,
         default=None,
-        help="Maximum raw video frames to process",
+        help="Optional cap on raw frames inspected",
     )
-    return parser
+    parser.add_argument(
+        "--spatial-grid",
+        action="store_true",
+        default=True,
+        help="Draw A1..D4 spatial grid overlay on tiles (enabled by default)",
+    )
+    parser.add_argument(
+        "--no-spatial-grid",
+        action="store_false",
+        dest="spatial_grid",
+        help="Disable A1..D4 spatial grid overlay on tiles",
+    )
+    parser.add_argument(
+        "--keep-disturbances",
+        action="store_true",
+        help="Do not suppress global camera-shake / exposure disturbance storyboards",
+    )
+    parser.add_argument(
+        "-V",
+        "--version",
+        action="version",
+        version=f"vlm-sieve {__version__}",
+    )
 
-
-def main(argv: list[str] | None = None) -> int:
-    """CLI entry point for running vlm-sieve.
-
-    Args:
-        argv: Command-line arguments list. Defaults to sys.argv[1:].
-
-    Returns:
-        Exit code (0 on success).
-    """
-    parser = build_parser()
     args = parser.parse_args(argv)
+    source: str | int = int(args.source) if args.source.isdigit() else args.source
 
-    config = SieveConfig(
+    cfg = SieveConfig(
         grid_layout=args.grid,
         motion_threshold=args.threshold,
-        auto_crop_roi=not args.no_crop,
+        sample_fps=args.sample_fps,
+        merge_gap_sec=args.merge_gap_sec,
+        pre_roll_sec=args.pre_roll_sec,
+        tile_max_dim=args.tile_max_dim,
         spatial_grid_overlay=args.spatial_grid,
+        suppress_disturbances=not args.keep_disturbances,
     )
 
-    sieve = VideoSieve(source=args.source, config=config)
-    events = sieve.process_video_to_dir(
-        output_dir=args.output_dir, max_frames=args.max_frames
-    )
-    savings = sieve.get_savings_report()
+    sieve = VideoSieve(source=source, config=cfg)
+    sieve.process_video_to_dir(args.output_dir, max_frames=args.max_frames)
+    report = sieve.get_savings_report()
 
-    # Formatted ASCII summary table
-    out_dir_resolved = Path(args.output_dir).resolve()
-    print("\n" + "=" * 60)
-    print("                vlm-sieve Processing Summary")
-    print("=" * 60)
-    print(f" Raw Frames Inspected  : {savings.raw_frames_inspected}")
-    print(f" Storyboards Emitted   : {savings.storyboards_emitted}")
-    print(f" Frames Dropped        : {savings.frames_dropped}")
-    print(f" Naive Token Estimate  : {savings.estimated_naive_tokens:,}")
-    print(f" Sieve Token Estimate  : {savings.estimated_sieve_tokens:,}")
-    print(f" Compression Ratio     : {savings.compression_ratio:.1f}x")
-    print(f" Token Savings         : {savings.tokens_saved_pct:.2f}%")
-    print("=" * 60)
-    if events:
-        print(f" Output Directory      : {out_dir_resolved}")
-        print(f" Total Events Saved    : {len(events)}")
-    print("=" * 60 + "\n")
-
+    print(f"vlm-sieve v{__version__} Complete!")
+    print(f"  Raw frames scanned     : {report.raw_frames_inspected}")
+    print(f"  Sampled frames decoded : {report.sampled_frames_decoded}")
+    print(f"  Storyboards emitted    : {report.storyboards_emitted}")
+    print(f"  Disturbances suppressed: {report.disturbances_suppressed}")
+    print(f"  Frame token reduction  : {report.tokens_saved_pct:.2f}%")
+    print(f"  Output directory       : {Path(args.output_dir).resolve()}")
     return 0
 
 

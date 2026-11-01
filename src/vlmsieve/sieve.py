@@ -1,298 +1,339 @@
-"""Unified developer SDK and pipeline coordinator for vlm-sieve."""
-
+"""High-level VideoSieve orchestrator for files, webcams, and frame iterables."""
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
+
+from collections.abc import Iterable, Iterator
 import json
-import time
-from collections.abc import AsyncIterator, Iterable, Iterator
 from pathlib import Path
+import time
 from typing import Any
 
 import cv2
 import numpy as np
 
-from vlmsieve.gatekeeper import MotionGatekeeper
-from vlmsieve.models import FramePacket, SieveConfig, TokenSavingsReport, VisualEvent
+from vlmsieve.gatekeeper import (
+    MotionGatekeeper,
+    is_camera_disturbance,
+    merge_episodes_with_bridges,
+    select_keyframes,
+)
+from vlmsieve.models import (
+    DisturbanceRecord,
+    FramePacket,
+    SieveConfig,
+    TokenSavingsReport,
+    VisualEvent,
+)
 from vlmsieve.roi import compute_event_roi
-from vlmsieve.sampler import select_keyframes
 from vlmsieve.storyboard import StoryboardPacker
 
 
 class VideoSieve:
-    """Unified video processing engine and frame gatekeeper for Vision-Language Models.
-
-    Orchestrates motion-based frame gating, temporal-peak keyframe sampling,
-    active ROI auto-cropping, and multi-frame structured storyboard packing.
-    """
+    """High-level spatial-temporal gatekeeper and storyboard generator (v0.2.1)."""
 
     def __init__(
         self,
-        source: str | int | Path | Iterable[np.ndarray],
+        source: str | Path | int | Iterable[np.ndarray],
         config: SieveConfig | None = None,
         **kwargs: Any,
     ) -> None:
-        """Initialize VideoSieve with a video source and configuration.
-
-        Args:
-            source: Video file path, camera index, stream URL, or iterable of BGR frames.
-            config: Optional pre-configured SieveConfig instance.
-            **kwargs: Hyperparameter overrides passed to SieveConfig.
-        """
         if config is not None and kwargs:
-            self.config = config.model_copy(update=kwargs)
+            merged_data = config.model_dump()
+            merged_data.update(kwargs)
+            self.config = SieveConfig(**merged_data)
         elif config is not None:
             self.config = config
         else:
             self.config = SieveConfig(**kwargs)
 
         self.source = source
-        self._packer = StoryboardPacker()
+        self.packer = StoryboardPacker(self.config)
+        self._raw_frames_inspected: int = 0
+        self._sampled_frames_decoded: int = 0
+        self._storyboards_emitted: int = 0
+        self._disturbances: list[DisturbanceRecord] = []
+        self._last_processing_sec: float = 0.0
 
-        # Cumulative pipeline metrics
-        self.raw_frames_inspected: int = 0
-        self.frames_dropped: int = 0
-        self.storyboards_emitted: int = 0
+    def get_disturbances(self) -> list[DisturbanceRecord]:
+        """Return camera-shake or exposure disturbances suppressed during the last run."""
+        return list(self._disturbances)
 
-    def _iter_raw_frames(
-        self, max_frames: int | None = None
-    ) -> Iterator[tuple[int, float, np.ndarray]]:
-        """Yield sequential (frame_index, timestamp_sec, frame_bgr) tuples from source."""
-        if isinstance(self.source, (str, int, Path)):
-            is_live_camera = isinstance(self.source, int) or (
-                isinstance(self.source, str) and self.source.isdigit()
-            )
-            src: str | int
-            if is_live_camera:
-                src = int(self.source)
-            elif isinstance(self.source, Path):
-                src = str(self.source)
-            else:
-                src = self.source
-
-            cap = cv2.VideoCapture(src)
-            if not cap.isOpened():
-                raise RuntimeError(f"Failed to open video source: {self.source}")
-
-            if is_live_camera and self.config.camera_warmup_frames > 0:
-                for _ in range(self.config.camera_warmup_frames):
-                    ret, _ = cap.read()
-                    if not ret:
-                        break
-
-            fps = cap.get(cv2.CAP_PROP_FPS) if not is_live_camera else 0.0
-            if fps <= 0 or np.isnan(fps):
-                fps = 30.0
-
-            start_wall_time = time.perf_counter()
-            frame_idx = 0
-            try:
-                while max_frames is None or frame_idx < max_frames:
-                    ret, frame_bgr = cap.read()
-                    if not ret or frame_bgr is None:
-                        break
-                    if is_live_camera:
-                        timestamp_sec = time.perf_counter() - start_wall_time
-                    else:
-                        timestamp_sec = frame_idx / fps
-                    yield frame_idx, timestamp_sec, frame_bgr
-                    frame_idx += 1
-            finally:
-                cap.release()
-
-        elif isinstance(self.source, Iterable):
-            fps = 30.0
-            for frame_idx, frame_bgr in enumerate(self.source):
-                if max_frames is not None and frame_idx >= max_frames:
-                    break
-                if not isinstance(frame_bgr, np.ndarray):
-                    raise TypeError(
-                        f"Expected video frame to be np.ndarray, got {type(frame_bgr)}"
-                    )
-                timestamp_sec = frame_idx / fps
-                yield frame_idx, timestamp_sec, frame_bgr
-        else:
-            raise TypeError(f"Unsupported video source type: {type(self.source)}")
-
-    def _build_visual_event(
+    def _emit_visual_event(
         self,
+        buf: list[FramePacket],
         event_id: int,
-        buffer: list[FramePacket],
+        episode_index: int,
         frame_w: int,
         frame_h: int,
     ) -> VisualEvent:
-        """Construct a complete VisualEvent from an emitted motion frame buffer."""
-        rows, cols = self.config.grid_layout
-        target_keyframes = rows * cols
+        max_slots = self.config.grid_layout[0] * self.config.grid_layout[1]
+        keyframes = select_keyframes(buf, target_count=max_slots)
+        roi = compute_event_roi(buf, frame_w, frame_h, self.config)
+        storyboard_img = self.packer.pack(keyframes, roi)
 
-        keyframes = select_keyframes(buffer, target_count=target_keyframes)
-        roi = compute_event_roi(buffer, frame_w, frame_h, self.config)
-        storyboard = self._packer.pack(keyframes, roi, self.config)
-
-        self.storyboards_emitted += 1
-        slots_per_storyboard = rows * cols
-        self.frames_dropped = max(
-            0,
-            self.raw_frames_inspected
-            - (self.storyboards_emitted * slots_per_storyboard),
-        )
-        report = self.get_savings_report()
+        kf_times = [round(p.timestamp_sec, 2) for p in keyframes]
+        kf_gaps = [
+            round(kf_times[j + 1] - kf_times[j], 2)
+            for j in range(len(kf_times) - 1)
+        ]
 
         return VisualEvent(
             event_id=event_id,
-            start_frame=buffer[0].frame_index,
-            end_frame=buffer[-1].frame_index,
-            start_time_sec=buffer[0].timestamp_sec,
-            end_time_sec=buffer[-1].timestamp_sec,
-            raw_frame_count=len(buffer),
+            episode_index=episode_index,
+            start_frame=buf[0].frame_index,
+            end_frame=buf[-1].frame_index,
+            start_time_sec=round(buf[0].timestamp_sec, 3),
+            end_time_sec=round(buf[-1].timestamp_sec, 3),
+            raw_frame_count=len(buf),
             keyframes=keyframes,
             roi_bbox=roi,
-            storyboard_pil=storyboard,
-            savings=report,
-        )
-
-    def get_savings_report(self) -> TokenSavingsReport:
-        """Calculate cumulative VLM token savings and compression metrics."""
-        naive_tokens = self.raw_frames_inspected * self.config.tokens_per_image
-        sieve_tokens = self.storyboards_emitted * self.config.tokens_per_image
-
-        if self.storyboards_emitted > 0:
-            compression_ratio = float(self.raw_frames_inspected) / float(
-                self.storyboards_emitted
-            )
-        else:
-            compression_ratio = float(self.raw_frames_inspected)
-
-        if naive_tokens > 0:
-            saved_pct = (naive_tokens - sieve_tokens) / float(naive_tokens) * 100.0
-        else:
-            saved_pct = 0.0
-
-        return TokenSavingsReport(
-            raw_frames_inspected=self.raw_frames_inspected,
-            frames_dropped=self.frames_dropped,
-            storyboards_emitted=self.storyboards_emitted,
-            estimated_naive_tokens=naive_tokens,
-            estimated_sieve_tokens=sieve_tokens,
-            compression_ratio=round(compression_ratio, 2),
-            tokens_saved_pct=round(saved_pct, 2),
+            storyboard_pil=storyboard_img,
+            savings=self.get_savings_report(),
+            keyframe_times_sec=kf_times,
+            keyframe_gaps_sec=kf_gaps,
         )
 
     def stream_events(self, max_frames: int | None = None) -> Iterator[VisualEvent]:
-        """Synchronously stream VisualEvent objects detected in the video source.
+        """Yield VisualEvent objects from a video file, webcam index, or frame iterable."""
+        self._raw_frames_inspected = 0
+        self._sampled_frames_decoded = 0
+        self._storyboards_emitted = 0
+        self._disturbances = []
+        t0 = time.perf_counter()
 
-        Args:
-            max_frames: Optional upper limit on raw video frames to inspect.
+        if not isinstance(self.source, (str, Path, int)):
+            fps = 30.0
+            gate = MotionGatekeeper(self.config, effective_fps=fps)
+            raw_events: list[list[FramePacket]] = []
+            frame_w, frame_h = 640, 360
 
-        Yields:
-            VisualEvent instances as discrete motion episodes close.
-        """
-        self.raw_frames_inspected = 0
-        self.frames_dropped = 0
-        self.storyboards_emitted = 0
+            for idx, frame in enumerate(self.source):
+                if max_frames is not None and idx >= max_frames:
+                    break
+                if not isinstance(frame, np.ndarray) or frame.ndim != 3:
+                    raise ValueError("Each frame in source iterable must be a 3D numpy ndarray.")
+                frame_h, frame_w = frame.shape[:2]
+                self._raw_frames_inspected += 1
+                self._sampled_frames_decoded += 1
+                ev = gate.process_frame(frame, idx, idx / fps)
+                if ev is not None:
+                    raw_events.append(ev)
 
-        gatekeeper = MotionGatekeeper(self.config)
-        last_w, last_h = 0, 0
-        event_id = 0
+            tail = gate.flush()
+            if tail is not None:
+                raw_events.append(tail)
 
-        for frame_idx, timestamp_sec, frame_bgr in self._iter_raw_frames(
-            max_frames=max_frames
-        ):
-            self.raw_frames_inspected += 1
-            last_h, last_w = frame_bgr.shape[:2]
-
-            emitted_buffer = gatekeeper.process_frame(
-                frame_bgr, frame_idx, timestamp_sec
+            merged = merge_episodes_with_bridges(
+                raw_events,
+                gate.bridge_pool,
+                self.config.merge_gap_sec,
+                self.config.max_event_frames,
             )
-            if emitted_buffer is not None:
-                event_id += 1
-                yield self._build_visual_event(event_id, emitted_buffer, last_w, last_h)
+            for ep_idx, buf in enumerate(merged, 1):
+                is_shake, mean_ratio, loc_cnt, glob_cnt = is_camera_disturbance(
+                    buf, frame_w, frame_h, self.config.motion_threshold
+                )
+                if is_shake and self.config.suppress_disturbances:
+                    scores = [p.motion_score for p in buf]
+                    self._disturbances.append(
+                        DisturbanceRecord(
+                            episode_index=ep_idx,
+                            start_frame=buf[0].frame_index,
+                            end_frame=buf[-1].frame_index,
+                            start_time_sec=round(buf[0].timestamp_sec, 3),
+                            end_time_sec=round(buf[-1].timestamp_sec, 3),
+                            duration_sec=round(buf[-1].timestamp_sec - buf[0].timestamp_sec, 3),
+                            max_motion_score=round(max(scores), 5) if scores else None,
+                            mean_bbox_area_ratio=round(mean_ratio, 3),
+                            localized_frames=loc_cnt,
+                            global_frames=glob_cnt,
+                        )
+                    )
+                    continue
+                self._storyboards_emitted += 1
+                yield self._emit_visual_event(
+                    buf, self._storyboards_emitted, ep_idx, frame_w, frame_h
+                )
+            self._last_processing_sec = time.perf_counter() - t0
+            return
 
-        # End of stream flush
-        tail_buffer = gatekeeper.flush()
-        if tail_buffer is not None and last_w > 0:
-            event_id += 1
-            yield self._build_visual_event(event_id, tail_buffer, last_w, last_h)
+        is_live_camera = isinstance(self.source, int)
+        cap_target = self.source if is_live_camera else str(Path(self.source).expanduser())
+        cap = cv2.VideoCapture(cap_target)
+        if not cap.isOpened():
+            raise RuntimeError(f"Cannot open video source: {self.source}")
 
-        slots_per_storyboard = self.config.grid_layout[0] * self.config.grid_layout[1]
-        self.frames_dropped = max(
-            0,
-            self.raw_frames_inspected
-            - (self.storyboards_emitted * slots_per_storyboard),
-        )
+        try:
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            if not fps or fps <= 0 or fps > 240:
+                fps = 30.0
+            frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 640
+            frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 360
 
-    async def astream_events(
-        self, max_frames: int | None = None
-    ) -> AsyncIterator[VisualEvent]:
-        """Asynchronously stream VisualEvent objects without blocking the event loop.
+            if not is_live_camera and self.config.sample_fps and self.config.sample_fps > 0:
+                stride = max(1, round(fps / self.config.sample_fps))
+            else:
+                stride = 1
 
-        Args:
-            max_frames: Optional upper limit on raw video frames to inspect.
+            effective_fps = fps / float(stride)
+            gate = MotionGatekeeper(self.config, effective_fps=effective_fps)
+            raw_events = []
+            idx = 0
 
-        Yields:
-            VisualEvent instances as discrete motion episodes close.
-        """
-        sync_iter = self.stream_events(max_frames=max_frames)
-        sentinel = object()
+            while True:
+                if max_frames is not None and idx >= max_frames:
+                    break
 
-        def _get_next() -> Any:
-            return next(sync_iter, sentinel)
+                if stride > 1 and (idx % stride != 0):
+                    if not cap.grab():
+                        break
+                    idx += 1
+                    self._raw_frames_inspected += 1
+                    continue
 
-        while True:
-            event = await asyncio.to_thread(_get_next)
-            if event is sentinel:
-                break
+                ok, frame = cap.read()
+                if not ok or frame is None:
+                    break
+
+                frame_h, frame_w = frame.shape[:2]
+                self._raw_frames_inspected += 1
+                self._sampled_frames_decoded += 1
+                ts = idx / fps
+                ev = gate.process_frame(frame, idx, ts)
+                idx += 1
+
+                if ev is not None:
+                    if is_live_camera and self.config.merge_gap_sec <= 0.0:
+                        self._storyboards_emitted += 1
+                        yield self._emit_visual_event(
+                            ev,
+                            self._storyboards_emitted,
+                            self._storyboards_emitted,
+                            frame_w,
+                            frame_h,
+                        )
+                    else:
+                        raw_events.append(ev)
+
+            tail = gate.flush()
+            if tail is not None:
+                if is_live_camera and self.config.merge_gap_sec <= 0.0:
+                    self._storyboards_emitted += 1
+                    yield self._emit_visual_event(
+                        tail,
+                        self._storyboards_emitted,
+                        self._storyboards_emitted,
+                        frame_w,
+                        frame_h,
+                    )
+                else:
+                    raw_events.append(tail)
+
+            if raw_events:
+                merged = merge_episodes_with_bridges(
+                    raw_events,
+                    gate.bridge_pool,
+                    self.config.merge_gap_sec,
+                    self.config.max_event_frames,
+                )
+                for ep_idx, buf in enumerate(merged, 1):
+                    is_shake, mean_ratio, loc_cnt, glob_cnt = is_camera_disturbance(
+                        buf, frame_w, frame_h, self.config.motion_threshold
+                    )
+                    if is_shake and self.config.suppress_disturbances:
+                        scores = [p.motion_score for p in buf]
+                        self._disturbances.append(
+                            DisturbanceRecord(
+                                episode_index=ep_idx,
+                                start_frame=buf[0].frame_index,
+                                end_frame=buf[-1].frame_index,
+                                start_time_sec=round(buf[0].timestamp_sec, 3),
+                                end_time_sec=round(buf[-1].timestamp_sec, 3),
+                                duration_sec=round(buf[-1].timestamp_sec - buf[0].timestamp_sec, 3),
+                                max_motion_score=round(max(scores), 5) if scores else None,
+                                mean_bbox_area_ratio=round(mean_ratio, 3),
+                                localized_frames=loc_cnt,
+                                global_frames=glob_cnt,
+                            )
+                        )
+                        continue
+                    self._storyboards_emitted += 1
+                    yield self._emit_visual_event(
+                        buf, self._storyboards_emitted, ep_idx, frame_w, frame_h
+                    )
+        finally:
+            cap.release()
+            self._last_processing_sec = time.perf_counter() - t0
+
+    async def astream_events(self, max_frames: int | None = None) -> AsyncIterator[VisualEvent]:
+        for event in self.stream_events(max_frames=max_frames):
+            await asyncio.sleep(0)
             yield event
+
+    def get_savings_report(self) -> TokenSavingsReport:
+        """Compute token savings metrics for the most recent stream_events() run."""
+        raw = self._raw_frames_inspected
+        emitted = self._storyboards_emitted
+        max_slots = self.config.grid_layout[0] * self.config.grid_layout[1]
+        dropped = max(0, raw - emitted * max_slots)
+
+        naive_tokens = raw * self.config.tokens_per_image
+        sieve_tokens = emitted * self.config.tokens_per_image
+        if naive_tokens > 0:
+            saved_pct = round((naive_tokens - sieve_tokens) / naive_tokens * 100.0, 2)
+        else:
+            saved_pct = 0.0
+
+        ratio = round(raw / float(emitted), 2) if emitted > 0 else float(raw)
+        return TokenSavingsReport(
+            raw_frames_inspected=raw,
+            sampled_frames_decoded=self._sampled_frames_decoded,
+            frames_dropped=dropped,
+            storyboards_emitted=emitted,
+            disturbances_suppressed=len(self._disturbances),
+            estimated_naive_tokens=naive_tokens,
+            estimated_sieve_tokens=sieve_tokens,
+            compression_ratio=ratio,
+            tokens_saved_pct=saved_pct,
+        )
 
     def process_video_to_dir(
         self, output_dir: str | Path, max_frames: int | None = None
     ) -> list[VisualEvent]:
-        """Process video and write JPEG storyboards and summary.json to output_dir.
-
-        Args:
-            output_dir: Destination directory path.
-            max_frames: Optional upper limit on raw video frames to inspect.
-
-        Returns:
-            List of emitted VisualEvent objects.
-        """
-        out_dir = Path(output_dir).resolve()
-        out_dir.mkdir(parents=True, exist_ok=True)
+        """Process video source, save event_XXX.jpg storyboards + summary.json, and return events."""
+        out_path = Path(output_dir)
+        out_path.mkdir(parents=True, exist_ok=True)
+        for old_jpg in out_path.glob("event_*.jpg"):
+            old_jpg.unlink()
 
         events: list[VisualEvent] = []
-        events_meta: list[dict[str, Any]] = []
+        event_summaries: list[dict[str, Any]] = []
 
         for event in self.stream_events(max_frames=max_frames):
+            img_name = f"event_{event.event_id:03d}.jpg"
+            event.save(out_path / img_name)
             events.append(event)
-            img_filename = f"event_{event.event_id:03d}.jpg"
-            img_path = out_dir / img_filename
-            event.save(img_path)
+            event_summaries.append(event.to_summary_dict(img_name))
 
-            events_meta.append(
-                {
-                    "event_id": event.event_id,
-                    "start_frame": event.start_frame,
-                    "end_frame": event.end_frame,
-                    "start_time_sec": round(event.start_time_sec, 3),
-                    "end_time_sec": round(event.end_time_sec, 3),
-                    "raw_frame_count": event.raw_frame_count,
-                    "roi_bbox": {
-                        "x": event.roi_bbox.x,
-                        "y": event.roi_bbox.y,
-                        "width": event.roi_bbox.width,
-                        "height": event.roi_bbox.height,
-                    },
-                    "image_file": img_filename,
-                }
-            )
-
-        final_savings = self.get_savings_report()
+        report = self.get_savings_report()
         summary_payload = {
-            "savings": final_savings.model_dump(),
-            "events": events_meta,
+            "pipeline": {
+                "version": "0.2.1",
+                "sample_fps": self.config.sample_fps,
+                "motion_threshold": self.config.motion_threshold,
+                "merge_gap_sec": self.config.merge_gap_sec,
+                "pre_roll_sec": self.config.pre_roll_sec,
+                "tile_max_dim": self.config.tile_max_dim,
+                "suppress_disturbances": self.config.suppress_disturbances,
+                "processing_wall_seconds": round(self._last_processing_sec, 3),
+            },
+            "savings": report.model_dump(),
+            "events": event_summaries,
+            "disturbances": [d.model_dump() for d in self._disturbances],
         }
-
-        with open(out_dir / "summary.json", "w", encoding="utf-8") as f:
-            json.dump(summary_payload, f, indent=2)
-
+        (out_path / "summary.json").write_text(
+            json.dumps(summary_payload, indent=2), encoding="utf-8"
+        )
         return events
