@@ -337,3 +337,120 @@ class VideoSieve:
             json.dumps(summary_payload, indent=2), encoding="utf-8"
         )
         return events
+# === VLM-SIEVE v0.3.0 UPGRADE ===
+from collections.abc import Iterator as _Iterator
+from pathlib import Path as _Path
+from typing import Any as _Any
+import cv2 as _cv2
+from PIL import Image as _PILImg
+from vlmsieve.models import (
+    SieveConfig as _SieveConfig,
+    TokenSavingsReport as _TokenSavingsReport,
+    VisualEvent as _VisualEvent,
+    calc_gemini_image_tokens as _calc_gemini,
+    calc_gpt4o_image_tokens as _calc_gpt4o,
+    calc_qwen7b_kv_cache_mb as _calc_kv_mb,
+    calc_qwen_vl_patch_tokens as _calc_qwen,
+)
+from vlmsieve.storyboard import (
+    StoryboardPacker as _V030Packer,
+    snap_to_multiple as _snap_mult,
+)
+
+_BaseVideoSieve = VideoSieve
+
+
+class VideoSieve(_BaseVideoSieve):  # type: ignore[no-redef]
+    def __init__(self, source: _Any = None, config: _SieveConfig | None = None, **kwargs: _Any) -> None:
+        if isinstance(source, _SieveConfig) and config is None:
+            config = source
+            source = kwargs.pop("source", [])
+        elif source is None:
+            source = []
+        super().__init__(source, config=config, **kwargs)
+        if hasattr(self, "config"):
+            self.packer = _V030Packer(config=self.config)
+        self._v030_emitted_sizes: list[tuple[int, int]] = []
+        self._v030_frame_dims: tuple[int, int] = (1280, 720)
+
+    def _update_source_and_dims(self, src: _Any) -> None:
+        if isinstance(src, (str, _Path)):
+            cap = _cv2.VideoCapture(str(src))
+            if cap.isOpened():
+                fw = int(cap.get(_cv2.CAP_PROP_FRAME_WIDTH)) or 1280
+                fh = int(cap.get(_cv2.CAP_PROP_FRAME_HEIGHT)) or 720
+                self._v030_frame_dims = (fw, fh)
+                cap.release()
+        elif isinstance(src, list) and src and hasattr(src[0], "shape"):
+            fh, fw = src[0].shape[:2]
+            self._v030_frame_dims = (int(fw), int(fh))
+
+    def _ensure_v030_event(self, ev: _VisualEvent) -> _VisualEvent:
+        sb = getattr(ev, "storyboard_pil", None)
+        if sb is not None:
+            pa = getattr(self.config, "patch_align", None)
+            if pa and (sb.width % pa != 0 or sb.height % pa != 0):
+                aw = _snap_mult(sb.width, pa)
+                ah = _snap_mult(sb.height, pa)
+                sb = sb.resize((aw, ah), resample=_PILImg.Resampling.LANCZOS)
+                object.__setattr__(ev, "storyboard_pil", sb)
+            if hasattr(sb, "_vlmsieve_grid_used"):
+                object.__setattr__(ev, "grid_used", tuple(sb._vlmsieve_grid_used))
+            if hasattr(sb, "_vlmsieve_cropped_tiles") and not getattr(ev, "cropped_tiles", None):
+                object.__setattr__(ev, "cropped_tiles", list(sb._vlmsieve_cropped_tiles))
+            elif not getattr(ev, "cropped_tiles", None):
+                object.__setattr__(ev, "cropped_tiles", [sb.copy()])
+        return ev
+
+    def stream_events(
+        self, source_or_max_frames: _Any = None, max_frames: int | None = None
+    ) -> _Iterator[_VisualEvent]:
+        if isinstance(source_or_max_frames, (str, _Path, list)):
+            self.source = source_or_max_frames
+            if hasattr(self, "_source"):
+                self._source = source_or_max_frames
+            actual_max = max_frames
+        else:
+            actual_max = source_or_max_frames if source_or_max_frames is not None else max_frames
+
+        self._v030_emitted_sizes = []
+        self._update_source_and_dims(getattr(self, "source", None))
+
+        for ev in super().stream_events(max_frames=actual_max):
+            ev = self._ensure_v030_event(ev)
+            if getattr(ev, "storyboard_pil", None) is not None:
+                self._v030_emitted_sizes.append(
+                    (ev.storyboard_pil.width, ev.storyboard_pil.height)
+                )
+            yield ev
+
+    def process_video(
+        self, source_or_max_frames: _Any = None, max_frames: int | None = None
+    ) -> list[_VisualEvent]:
+        return list(self.stream_events(source_or_max_frames, max_frames=max_frames))
+
+    def get_savings_report(self) -> _TokenSavingsReport:
+        base = super().get_savings_report()
+        gem_tok = sum(_calc_gemini(w, h) for w, h in self._v030_emitted_sizes)
+        gpt_tok = sum(_calc_gpt4o(w, h) for w, h in self._v030_emitted_sizes)
+        qwen_tok = sum(_calc_qwen(w, h, 28) for w, h in self._v030_emitted_sizes)
+        kv_mb = _calc_kv_mb(qwen_tok)
+
+        fw, fh = self._v030_frame_dims
+        sampled = getattr(base, "sampled_frames_decoded", 0) or getattr(
+            base, "raw_frames_inspected", 0
+        )
+        naive_qwen_tok = sampled * _calc_qwen(fw, fh, 28)
+        naive_kv_mb = _calc_kv_mb(naive_qwen_tok)
+        kv_saved_mb = round(max(0.0, naive_kv_mb - kv_mb), 2)
+
+        return base.model_copy(
+            update={
+                "target_vlm": getattr(self.config, "target_vlm", "gemini"),
+                "gemini_storyboard_tokens": gem_tok,
+                "gpt4o_storyboard_tokens": gpt_tok,
+                "qwen_vl_patch_tokens": qwen_tok,
+                "qwen7b_kv_cache_mb": kv_mb,
+                "qwen7b_kv_cache_saved_mb": kv_saved_mb,
+            }
+        )

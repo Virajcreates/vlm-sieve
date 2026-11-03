@@ -19,7 +19,7 @@ from vlmsieve.roi import compute_event_roi, crop_packet_to_roi
 from vlmsieve.sieve import VideoSieve
 from vlmsieve.storyboard import StoryboardPacker
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 
 __all__ = [
     "__version__",
@@ -38,3 +38,5 @@ __all__ = [
     "merge_episodes_with_bridges",
     "select_keyframes",
 ]
+
+from .models import VLM_TARGET_PROFILES

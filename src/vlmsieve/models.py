@@ -264,3 +264,191 @@ class VisualEvent(BaseModel):
             "keyframe_times_sec": self.keyframe_times_sec,
             "keyframe_gaps_sec": self.keyframe_gaps_sec,
         }
+# === VLM-SIEVE v0.3.0 UPGRADE ===
+import math as _math
+from typing import Any as _Any
+from PIL import Image as _PILImage
+from pydantic import Field as _Field, model_validator as _model_validator
+
+VLM_TARGET_PROFILES: dict[str, dict[str, _Any]] = {
+    "gemini": {
+        "grid_layout": (2, 3),
+        "adaptive_grid": False,
+        "tile_max_dim": 640,
+        "patch_align": None,
+        "gutter_px": 4,
+        "spatial_grid_style": "cells",
+    },
+    "gpt-4o": {
+        "grid_layout": (2, 3),
+        "adaptive_grid": True,
+        "tile_max_dim": 512,
+        "patch_align": None,
+        "gutter_px": 0,
+        "spatial_grid_style": "axes",
+    },
+    "qwen-vl": {
+        "grid_layout": (2, 3),
+        "adaptive_grid": True,
+        "tile_max_dim": 448,
+        "patch_align": 28,
+        "gutter_px": 0,
+        "spatial_grid_style": "axes",
+    },
+    "local-7b": {
+        "grid_layout": (2, 3),
+        "adaptive_grid": True,
+        "tile_max_dim": 336,
+        "patch_align": 28,
+        "gutter_px": 0,
+        "spatial_grid_style": "axes",
+    },
+}
+
+_CLI_CONTEXT_OVERRIDES: dict[str, _Any] = {}
+
+
+def calc_gemini_image_tokens(w: int, h: int) -> int:
+    if w <= 0 or h <= 0:
+        return 0
+    if w <= 384 and h <= 384:
+        return 258
+    tiles_w = max(1, _math.ceil(w / 768.0))
+    tiles_h = max(1, _math.ceil(h / 768.0))
+    return 258 + (tiles_w * tiles_h * 258)
+
+
+def calc_gpt4o_image_tokens(w: int, h: int) -> int:
+    if w <= 0 or h <= 0:
+        return 0
+    scale = min(1.0, 2048.0 / max(w, h))
+    sw, sh = w * scale, h * scale
+    if min(sw, sh) > 768.0:
+        s2 = 768.0 / min(sw, sh)
+        sw, sh = sw * s2, sh * s2
+    tiles = _math.ceil(sw / 512.0) * _math.ceil(sh / 512.0)
+    return 85 + 170 * tiles
+
+
+def calc_qwen_vl_patch_tokens(w: int, h: int, patch_stride: int = 28) -> int:
+    if w <= 0 or h <= 0:
+        return 0
+    stride = max(1, int(patch_stride))
+    aligned_w = _math.ceil(w / float(stride)) * stride
+    aligned_h = _math.ceil(h / float(stride)) * stride
+    return (aligned_w // stride) * (aligned_h // stride)
+
+
+def calc_qwen7b_kv_cache_mb(visual_tokens: int) -> float:
+    bytes_per_token = 28 * 4 * 128 * 2 * 2
+    return round((max(0, visual_tokens) * bytes_per_token) / (1024.0 * 1024.0), 2)
+
+
+_BaseSieveConfig = SieveConfig
+
+
+class SieveConfig(_BaseSieveConfig):  # type: ignore[no-redef]
+    target_vlm: str = "gemini"
+    adaptive_grid: bool = False
+    patch_align: int | None = None
+    gutter_px: int = 4
+    spatial_grid_style: str = "cells"
+
+    @_model_validator(mode="before")
+    @classmethod
+    def _apply_v030_target_profile(cls, data: _Any) -> _Any:
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+
+        if _CLI_CONTEXT_OVERRIDES:
+            for k, v in _CLI_CONTEXT_OVERRIDES.items():
+                if not k.startswith("_") and v is not None:
+                    data[k] = v
+            if _CLI_CONTEXT_OVERRIDES.get("_use_profile_tile_max_dim"):
+                data.pop("tile_max_dim", None)
+            if _CLI_CONTEXT_OVERRIDES.get("_use_profile_grid_layout"):
+                data.pop("grid_layout", None)
+
+        user_passed_style = "spatial_grid_style" in data
+        target = str(data.get("target_vlm", "gemini")).lower().strip()
+        if target not in VLM_TARGET_PROFILES:
+            raise ValueError(
+                f"Unknown target_vlm '{target}'. Supported profiles: {list(VLM_TARGET_PROFILES.keys())}"
+            )
+        data["target_vlm"] = target
+        prof = VLM_TARGET_PROFILES[target]
+        for k, v in prof.items():
+            data.setdefault(k, v)
+
+        style = str(data.get("spatial_grid_style", "cells")).lower().strip()
+        if style not in {"cells", "axes", "none"}:
+            raise ValueError("spatial_grid_style must be 'cells', 'axes', or 'none'")
+
+        if data.get("spatial_grid_overlay") is False and not user_passed_style:
+            data["spatial_grid_style"] = "none"
+        elif style == "none":
+            data["spatial_grid_overlay"] = False
+        else:
+            data["spatial_grid_style"] = style
+        return data
+
+
+_BaseVisualEvent = VisualEvent
+
+
+class VisualEvent(_BaseVisualEvent):  # type: ignore[no-redef]
+    grid_used: tuple[int, int] = (2, 3)
+    cropped_tiles: list[_Any] = _Field(default_factory=list, exclude=True)
+
+    @property
+    def storyboard(self) -> _PILImage.Image | None:
+        return getattr(self, "storyboard_pil", None)
+
+    @_model_validator(mode="after")
+    def _extract_v030_packer_metadata(self) -> "VisualEvent":
+        sb = getattr(self, "storyboard_pil", None)
+        if sb is not None:
+            if hasattr(sb, "_vlmsieve_grid_used"):
+                object.__setattr__(self, "grid_used", tuple(sb._vlmsieve_grid_used))
+            if hasattr(sb, "_vlmsieve_cropped_tiles") and not self.cropped_tiles:
+                object.__setattr__(self, "cropped_tiles", list(sb._vlmsieve_cropped_tiles))
+        return self
+
+    def get_cropped_tiles(self) -> list[_PILImage.Image]:
+        return list(self.cropped_tiles)
+
+    def provider_token_estimates(self) -> dict[str, _Any]:
+        sb = getattr(self, "storyboard_pil", None)
+        if sb is None:
+            return {
+                "canvas_size": [0, 0],
+                "is_28px_aligned": False,
+                "gemini_tokens": 0,
+                "gpt4o_tokens": 0,
+                "qwen_vl_tokens": 0,
+                "qwen7b_kv_cache_mb": 0.0,
+            }
+        w, h = sb.width, sb.height
+        q_tok = calc_qwen_vl_patch_tokens(w, h, 28)
+        return {
+            "canvas_size": [w, h],
+            "grid_used": f"{self.grid_used[0]}x{self.grid_used[1]}",
+            "is_28px_aligned": (w % 28 == 0 and h % 28 == 0),
+            "gemini_tokens": calc_gemini_image_tokens(w, h),
+            "gpt4o_tokens": calc_gpt4o_image_tokens(w, h),
+            "qwen_vl_tokens": q_tok,
+            "qwen7b_kv_cache_mb": calc_qwen7b_kv_cache_mb(q_tok),
+        }
+
+
+_BaseTokenSavingsReport = TokenSavingsReport
+
+
+class TokenSavingsReport(_BaseTokenSavingsReport):  # type: ignore[no-redef]
+    target_vlm: str = "gemini"
+    gemini_storyboard_tokens: int = 0
+    gpt4o_storyboard_tokens: int = 0
+    qwen_vl_patch_tokens: int = 0
+    qwen7b_kv_cache_mb: float = 0.0
+    qwen7b_kv_cache_saved_mb: float = 0.0

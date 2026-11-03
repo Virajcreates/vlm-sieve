@@ -139,3 +139,61 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+# === VLM-SIEVE v0.3.0 UPGRADE ===
+import argparse as _argparse
+import sys as _sys
+from vlmsieve.models import _CLI_CONTEXT_OVERRIDES
+
+_orig_cli_main = main
+
+
+def main(argv: list[str] | None = None) -> int:  # type: ignore[no-redef]
+    raw_argv = list(_sys.argv[1:] if argv is None else argv)
+
+    extra_parser = _argparse.ArgumentParser(add_help=False)
+    extra_parser.add_argument(
+        "--target-vlm",
+        choices=["gemini", "gpt-4o", "qwen-vl", "local-7b"],
+        default=None,
+    )
+    extra_parser.add_argument("--patch-align", type=int, default=None)
+    extra_parser.add_argument(
+        "--spatial-grid-style",
+        choices=["cells", "axes", "none"],
+        default=None,
+    )
+    extra_parser.add_argument("--adaptive-grid", action="store_true", default=None)
+    extra_parser.add_argument("--no-adaptive-grid", action="store_true", default=None)
+    extra_parser.add_argument("--gutter-px", type=int, default=None)
+
+    known, remaining = extra_parser.parse_known_args(raw_argv)
+
+    user_passed_tile_dim = any(
+        a == "--tile-max-dim" or a.startswith("--tile-max-dim=") for a in remaining
+    )
+    user_passed_grid = any(
+        a in {"-g", "--grid"} or a.startswith("--grid=") for a in remaining
+    )
+
+    _CLI_CONTEXT_OVERRIDES.clear()
+    if known.target_vlm is not None:
+        _CLI_CONTEXT_OVERRIDES["target_vlm"] = known.target_vlm
+        if not user_passed_tile_dim:
+            _CLI_CONTEXT_OVERRIDES["_use_profile_tile_max_dim"] = True
+        if not user_passed_grid:
+            _CLI_CONTEXT_OVERRIDES["_use_profile_grid_layout"] = True
+    if known.patch_align is not None:
+        _CLI_CONTEXT_OVERRIDES["patch_align"] = known.patch_align
+    if known.spatial_grid_style is not None:
+        _CLI_CONTEXT_OVERRIDES["spatial_grid_style"] = known.spatial_grid_style
+    if known.adaptive_grid:
+        _CLI_CONTEXT_OVERRIDES["adaptive_grid"] = True
+    elif known.no_adaptive_grid:
+        _CLI_CONTEXT_OVERRIDES["adaptive_grid"] = False
+    if known.gutter_px is not None:
+        _CLI_CONTEXT_OVERRIDES["gutter_px"] = known.gutter_px
+
+    try:
+        return _orig_cli_main(remaining)
+    finally:
+        _CLI_CONTEXT_OVERRIDES.clear()

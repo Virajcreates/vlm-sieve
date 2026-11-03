@@ -1,4 +1,4 @@
-"""Comprehensive Unit & End-to-End Test Suite for vlm-sieve v0.2.1."""
+"""Comprehensive Unit & End-to-End Test Suite for vlm-sieve v0.3.0."""
 from __future__ import annotations
 
 import asyncio
@@ -30,7 +30,7 @@ from vlmsieve.cli import main, parse_grid
 
 
 def test_version_and_exports() -> None:
-    assert __version__ == "0.2.1"
+    assert __version__ == "0.3.0"
 
 
 def test_bounding_box_geometry_and_padding() -> None:
