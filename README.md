@@ -87,3 +87,31 @@ python -m vlmsieve ./input_video.mp4 -o ./sieve_output
 ## License
 
 MIT License
+
+---
+
+## New in v0.3.0: Local VLM (`Qwen2.5-VL`) 28px Patch Alignment & Target Profiles
+
+`v0.3.0` adds one-line target profiles (`target_vlm="gemini" | "gpt-4o" | "qwen-vl" | "local-7b"`), **28px NaViT patch alignment**, **adaptive grids** (`1x1`..`2x3` to eliminate empty `"NO FRAME"` patches), **outer-border `A..D` / `1..4` axis ticks**, and **FP16 KV-cache VRAM telemetry**:
+
+```python
+from vlmsieve import SieveConfig, VideoSieve
+
+# Optimize for Qwen2.5-VL (448px tiles, 28px aligned, 0px gutter, clean outer-border axis ticks)
+sieve = VideoSieve("security_footage.mp4", config=SieveConfig(target_vlm="qwen-vl"))
+events = sieve.process_video()
+
+report = sieve.get_savings_report()
+print(f"Qwen-VL Patch Tokens: {report.qwen_vl_patch_tokens:,}")
+print(f"Qwen2.5-VL-7B KV Cache: {report.qwen7b_kv_cache_mb} MB (Saved {report.qwen7b_kv_cache_saved_mb:,.1f} MB)")
+```
+
+| Video Dataset | Profile | Canvas (`WxH`) | `28px` Aligned | Gemini Tokens | Qwen2.5-VL Patch Tokens | Reduction vs `v0.2.1` | Qwen2.5-VL-7B KV Cache |
+|---|---|---|---|---|---|---|---|
+| **5m 22s Ring Video** | `v0.2.1` Baseline | `1936x732` | No | `4,823` | `9,776` | Baseline | `534.62 MB` |
+| **5m 22s Ring Video** | `v0.3.0 qwen-vl` | `1344x504` | **Yes** | `4,485` | **`4,608`** | **`-52.9%`** | **`252.00 MB`** |
+| **5m 22s Ring Video** | `v0.3.0 local-7b` | `1008x392` | **Yes** | **`4,426`** | **`2,592`** | **`-73.5%`** | **`141.75 MB`** |
+| **40s Vivint Video** | `v0.2.1` Baseline | `1408x1292` | No | `1,292` | `2,397` | Baseline | `131.09 MB` |
+| **40s Vivint Video** | `v0.3.0 qwen-vl` | `1008x896` | **Yes** | **`1,205`** | **`1,152`** | **`-51.9%`** | **`63.00 MB`** |
+| **40s Vivint Video** | `v0.3.0 local-7b` | `756x672` | **Yes** | **`1,205`** | **`648`** | **`-73.0%`** | **`35.44 MB`** |
+
