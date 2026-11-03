@@ -43,3 +43,8 @@ summary.json
 # Explicitly whitelist ONLY the synthetic robotics showcase image
 !assets/
 !assets/demo_storyboard.jpg
+
+# Explicitly allow public benchmark sample videos
+!assets/sample-videos/
+!assets/sample-videos/*.mp4
+!assets/sample-videos/*.webm
