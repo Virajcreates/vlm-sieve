@@ -74,16 +74,16 @@ Measured using provider-reported `usage_metadata.prompt_token_count` on **Gemini
 Want to reproduce the benchmarks or inspect the generated storyboards and raw VLM responses?
 
 ### 1. Sample Input Videos (`assets/sample-videos/`)
-* [Ring Shovel Identification (`.webm`)](assets/sample-videos/ring-shovel-identification.webm)
-* [Vivint Doorbell Sample (`.mp4`)](assets/sample-videos/vivint-doorbell-sample.mp4)
+* [Ring Shovel Identification (`.webm`)](https://github.com/Virajcreates/vlm-sieve/tree/main/assets/sample-videos/ring-shovel-identification.webm)
+* [Vivint Doorbell Sample (`.mp4`)](https://github.com/Virajcreates/vlm-sieve/tree/main/assets/sample-videos/vivint-doorbell-sample.mp4)
 
 ### 2. Generated Storyboards & JSON Verification Reports (`benchmarks/v030_results/`)
-* **Provider-Counted VLM Accuracy & Token Verification JSON:** [`benchmarks/v030_results/v030_accuracy_verification.json`](benchmarks/v030_results/v030_accuracy_verification.json)
-* **Ring Security Profile Comparison & Storyboards:** [`benchmarks/v030_results/ring_security/`](benchmarks/v030_results/ring_security/)
-* **Vivint Doorbell Profile Comparison & Storyboards:** [`benchmarks/v030_results/vivint_doorbell/`](benchmarks/v030_results/vivint_doorbell/)
+* **Provider-Counted VLM Accuracy & Token Verification JSON:** [`benchmarks/v030_results/v030_accuracy_verification.json`](https://github.com/Virajcreates/vlm-sieve/tree/main/benchmarks/v030_results/v030_accuracy_verification.json)
+* **Ring Security Profile Comparison & Storyboards:** [`benchmarks/v030_results/ring_security/`](https://github.com/Virajcreates/vlm-sieve/tree/main/benchmarks/v030_results/ring_security/)
+* **Vivint Doorbell Profile Comparison & Storyboards:** [`benchmarks/v030_results/vivint_doorbell/`](https://github.com/Virajcreates/vlm-sieve/tree/main/benchmarks/v030_results/vivint_doorbell/)
 
 **Sample `v0.3.0` (`qwen-vl` Profile — `1008x896`, `28px`-Aligned, Outer-Border Axis Ticks):**
-![Vivint Doorbell v0.3.0 Qwen-VL Storyboard](benchmarks/v030_results/vivint_doorbell/v030_qwen_vl/event_001.jpg)
+![Vivint Doorbell v0.3.0 Qwen-VL Storyboard](https://raw.githubusercontent.com/Virajcreates/vlm-sieve/main/benchmarks/v030_results/vivint_doorbell/v030_qwen_vl/event_001.jpg)
 
 ---
 

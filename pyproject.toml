@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "vlm-sieve"
-version = "0.3.0"
+version = "0.3.0.post1"
 description = "Local-first, zero-GPU spatial-temporal video gatekeeper & storyboard packer that cuts Vision-Language Model (VLM) token costs by 65-85%."
 readme = "README.md"
 requires-python = ">=3.9"
@@ -75,3 +75,10 @@ packages = ["src/vlmsieve"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+  "/assets",
+  "/benchmarks",
+  "/tests",
+]
