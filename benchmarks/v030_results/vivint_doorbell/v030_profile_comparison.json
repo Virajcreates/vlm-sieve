@@ -1,0 +1,154 @@
+[
+  {
+    "profile": "v021_baseline",
+    "description": "v0.2.1 Fixed 2x3, 640px, 96 interior cell badges, unaligned 4px gutters",
+    "storyboards": 1,
+    "sample_canvas": [
+      1408,
+      1292
+    ],
+    "sample_grid": "2x3",
+    "28px_aligned": false,
+    "empty_slots": 0,
+    "gemini_tokens": 1290,
+    "gpt4o_tokens": 765,
+    "qwen_vl_tokens": 2397,
+    "qwen_saved_vs_v021_pct": 0.0,
+    "qwen7b_kv_cache_mb": 131.09,
+    "kv_cache_saved_vs_10fps_mb": 10959.53,
+    "episodes": [
+      {
+        "grid_used": "2x3",
+        "keyframes_packed": 6,
+        "empty_no_frame_slots": 0,
+        "tile_size": [
+          464,
+          640
+        ],
+        "canvas_size": [
+          1408,
+          1292
+        ],
+        "is_28px_aligned": false,
+        "gemini_tokens": 1290,
+        "gpt4o_tokens": 765,
+        "qwen_vl_tokens": 2397,
+        "qwen7b_kv_cache_mb": 131.09
+      }
+    ]
+  },
+  {
+    "profile": "v030_gemini",
+    "description": "v0.3.0 Adaptive Grid, 640px tiles, interior A1..D4 cells",
+    "storyboards": 1,
+    "sample_canvas": [
+      1408,
+      1292
+    ],
+    "sample_grid": "2x3",
+    "28px_aligned": false,
+    "empty_slots": 0,
+    "gemini_tokens": 1290,
+    "gpt4o_tokens": 765,
+    "qwen_vl_tokens": 2397,
+    "qwen_saved_vs_v021_pct": 0.0,
+    "qwen7b_kv_cache_mb": 131.09,
+    "kv_cache_saved_vs_10fps_mb": 10959.53,
+    "episodes": [
+      {
+        "grid_used": "2x3",
+        "keyframes_packed": 6,
+        "empty_no_frame_slots": 0,
+        "tile_size": [
+          464,
+          640
+        ],
+        "canvas_size": [
+          1408,
+          1292
+        ],
+        "is_28px_aligned": false,
+        "gemini_tokens": 1290,
+        "gpt4o_tokens": 765,
+        "qwen_vl_tokens": 2397,
+        "qwen7b_kv_cache_mb": 131.09
+      }
+    ]
+  },
+  {
+    "profile": "v030_qwen_vl",
+    "description": "v0.3.0 Adaptive Grid, 448px (16x28) tiles, 28px NaViT aligned, 0px gutter, clean border axes",
+    "storyboards": 1,
+    "sample_canvas": [
+      1008,
+      896
+    ],
+    "sample_grid": "2x3",
+    "28px_aligned": true,
+    "empty_slots": 0,
+    "gemini_tokens": 1290,
+    "gpt4o_tokens": 765,
+    "qwen_vl_tokens": 1152,
+    "qwen_saved_vs_v021_pct": 51.9,
+    "qwen7b_kv_cache_mb": 63.0,
+    "kv_cache_saved_vs_10fps_mb": 11027.62,
+    "episodes": [
+      {
+        "grid_used": "2x3",
+        "keyframes_packed": 6,
+        "empty_no_frame_slots": 0,
+        "tile_size": [
+          336,
+          448
+        ],
+        "canvas_size": [
+          1008,
+          896
+        ],
+        "is_28px_aligned": true,
+        "gemini_tokens": 1290,
+        "gpt4o_tokens": 765,
+        "qwen_vl_tokens": 1152,
+        "qwen7b_kv_cache_mb": 63.0
+      }
+    ]
+  },
+  {
+    "profile": "v030_local_7b",
+    "description": "v0.3.0 2x3 Compact Grid for 3B/7B models, 336px (12x28) tiles, 28px aligned, border axes",
+    "storyboards": 1,
+    "sample_canvas": [
+      756,
+      672
+    ],
+    "sample_grid": "2x3",
+    "28px_aligned": true,
+    "empty_slots": 0,
+    "gemini_tokens": 516,
+    "gpt4o_tokens": 765,
+    "qwen_vl_tokens": 648,
+    "qwen_saved_vs_v021_pct": 73.0,
+    "qwen7b_kv_cache_mb": 35.44,
+    "kv_cache_saved_vs_10fps_mb": 11055.18,
+    "episodes": [
+      {
+        "grid_used": "2x3",
+        "keyframes_packed": 6,
+        "empty_no_frame_slots": 0,
+        "tile_size": [
+          252,
+          336
+        ],
+        "canvas_size": [
+          756,
+          672
+        ],
+        "is_28px_aligned": true,
+        "gemini_tokens": 516,
+        "gpt4o_tokens": 765,
+        "qwen_vl_tokens": 648,
+        "qwen7b_kv_cache_mb": 35.44
+      }
+    ]
+  }
+]

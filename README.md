@@ -15,9 +15,9 @@
 ## What's New in v0.3.0 (Local VLM & `NaViT` Patch Optimization)
 
 1. **One-Line VLM Target Profiles (`target_vlm` / `--target-vlm`):** Built-in presets (`"gemini"`, `"gpt-4o"`, `"qwen-vl"`, `"local-7b"`) that automatically tune tile dimensions, ViT patch stride alignment, gutter spacing, and coordinate overlay density.
-2. **28px NaViT Patch-Stride Alignment (`patch_align=28`, `gutter_px=0`):** Snaps tile and canvas dimensions to exact multiples of `28px` (`448px` = 16×28 on `qwen-vl`, `336px` = 12×28 on `local-7b`) so local dynamic-resolution ViTs (`Qwen2.5-VL` on vLLM / Ollama) ingest storyboards with **zero secondary resizing**—cutting local patch tokens and FP16 KV-cache VRAM by another **52% to 73.5%** over `v0.2.1`.
+2. **28px NaViT Patch-Stride Alignment (`patch_align=28`, `gutter_px=0`):** Snaps tile and canvas dimensions to exact multiples of `28px` (`448px` = 16x28 on `qwen-vl`, `336px` = 12x28 on `local-7b`) so local dynamic-resolution ViTs (`Qwen2.5-VL` on vLLM / Ollama) ingest storyboards with **zero secondary resizing**—cutting local patch tokens and FP16 KV-cache VRAM by another **52% to 73.5%** over `v0.2.1`.
 3. **Adaptive Grid Sizing (`adaptive_grid=True`):** Dynamically selects `1x1`, `1x2`, `1x3`, `2x2`, or `2x3` layouts based on the episode's keyframe count so short motion bursts never emit blank `"NO FRAME"` dead tiles.
-4. **Outer-Border Axis Ticks (`spatial_grid_style="axes"`):** Replaces the 96 interior `A1..D4` cell text badges (`16 cells × 6 tiles`) with **8 clean outer-border ruler ticks** (`A..D` along the right edge, `1..4` along the bottom edge), keeping the center of every tile 100% unobstructed and preventing OCR distraction on 3B/7B models.
+4. **Outer-Border Axis Ticks (`spatial_grid_style="axes"`):** Replaces the 96 interior `A1..D4` cell text badges (`16 cells x 6 tiles`) with **8 clean outer-border ruler ticks** (`A..D` along the right edge, `1..4` along the bottom edge), keeping the center of every tile 100% unobstructed and preventing OCR distraction on 3B/7B models.
 5. **Discrete Tile Export (`event.get_cropped_tiles()`):** Exports the individual ROI-cropped keyframes as a `list[PIL.Image.Image]` for multi-image local VLM endpoints.
 6. **Multi-Provider Token & KV-Cache Telemetry:** `sieve.get_savings_report()` and `event.provider_token_estimates()` calculate exact `gemini_storyboard_tokens`, `gpt4o_storyboard_tokens`, `qwen_vl_patch_tokens`, `qwen7b_kv_cache_mb`, and `qwen7b_kv_cache_saved_mb`.
 
@@ -37,9 +37,9 @@
 | Profile | Max Grid | `adaptive_grid` | `tile_max_dim` | `patch_align` | `gutter_px` | `spatial_grid_style` | Best For |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **`"gemini"`** | `2x3` | `False` | `640px` | `None` | `4px` | `"cells"` (interior `A1..D4`) | Gemini 2.5 / 3.8 Flash & Pro |
-| **`"gpt-4o"`** | `2x3` | `True` | `512px` | `None` | `0px` | `"axes"` (outer border ticks) | GPT-4o / GPT-4.1 (512×512 tiles) |
-| **`"qwen-vl"`** | `2x3` | `True` | `448px` (16×28) | `28px` | `0px` | `"axes"` (outer border ticks) | Qwen2.5-VL-7B / 32B / 72B (`NaViT`) |
-| **`"local-7b"`** | `2x3` | `True` | `336px` (12×28) | `28px` | `0px` | `"axes"` (outer border ticks) | Edge GPUs, 3B/7B local VLMs |
+| **`"gpt-4o"`** | `2x3` | `True` | `512px` | `None` | `0px` | `"axes"` (outer border ticks) | GPT-4o / GPT-4.1 (512x512 tiles) |
+| **`"qwen-vl"`** | `2x3` | `True` | `448px` (16x28) | `28px` | `0px` | `"axes"` (outer border ticks) | Qwen2.5-VL-7B / 32B / 72B (`NaViT`) |
+| **`"local-7b"`** | `2x3` | `True` | `336px` (12x28) | `28px` | `0px` | `"axes"` (outer border ticks) | Edge GPUs, 3B/7B local VLMs |
 
 ---
 
@@ -69,19 +69,97 @@ Measured using provider-reported `usage_metadata.prompt_token_count` on **Gemini
 
 ---
 
+## Sample Videos & Verifiable Benchmark Artifacts
+
+Want to reproduce the benchmarks or inspect the generated storyboards and raw VLM responses?
+
+### 1. Sample Input Videos (`assets/sample-videos/`)
+* [Ring Shovel Identification (`.webm`)](assets/sample-videos/ring-shovel-identification.webm)
+* [Vivint Doorbell Sample (`.mp4`)](assets/sample-videos/vivint-doorbell-sample.mp4)
+
+### 2. Generated Storyboards & JSON Verification Reports (`benchmarks/v030_results/`)
+* **Provider-Counted VLM Accuracy & Token Verification JSON:** [`benchmarks/v030_results/v030_accuracy_verification.json`](benchmarks/v030_results/v030_accuracy_verification.json)
+* **Ring Security Profile Comparison & Storyboards:** [`benchmarks/v030_results/ring_security/`](benchmarks/v030_results/ring_security/)
+* **Vivint Doorbell Profile Comparison & Storyboards:** [`benchmarks/v030_results/vivint_doorbell/`](benchmarks/v030_results/vivint_doorbell/)
+
+**Sample `v0.3.0` (`qwen-vl` Profile — `1008x896`, `28px`-Aligned, Outer-Border Axis Ticks):**
+![Vivint Doorbell v0.3.0 Qwen-VL Storyboard](benchmarks/v030_results/vivint_doorbell/v030_qwen_vl/event_001.jpg)
+
+---
+
 ## Installation
 
 ```bash
 pip install -U vlm-sieve
 ```
 
-## Sample Videos
+---
 
-Want to reproduce the benchmarks or experiment with vlm-sieve?
+## Quickstart (Python API)
 
-We've included sample video inputs in the repository:
+### Option A: Using `v0.3.0` Target Profiles (`qwen-vl`, `local-7b`, `gpt-4o`, `gemini`)
 
-- [Ring Shovel Identification (.webm)](assets/sample-videos/ring-shovel-identification.webm)
-- [Vivint Doorbell Sample (.mp4)](assets/sample-videos/vivint-doorbell-sample.mp4)
+```python
+from vlmsieve import SieveConfig, VideoSieve
 
-See [assets/sample-videos/](assets/sample-videos/) for details.
+# Optimize for Qwen2.5-VL (448px tiles, 28px NaViT alignment, 0px gutter, outer-border axis ticks)
+sieve = VideoSieve("security_footage.mp4", config=SieveConfig(target_vlm="qwen-vl"))
+events = sieve.process_video()
+
+for ev in events:
+    print(f"Event {ev.event_id}: {ev.start_time_sec:.2f}s - {ev.end_time_sec:.2f}s")
+    print("  Grid & Token Estimates:", ev.provider_token_estimates())
+    crops = ev.get_cropped_tiles()  # Discrete ROI-cropped keyframe PIL Images
+
+report = sieve.get_savings_report()
+print(f"Qwen-VL Patch Tokens : {report.qwen_vl_patch_tokens:,}")
+print(f"Qwen2.5-VL-7B KV VRAM: {report.qwen7b_kv_cache_mb} MB (Saved {report.qwen7b_kv_cache_saved_mb:,.1f} MB)")
+```
+
+### Option B: Custom Parameters & Directory Export
+
+```python
+from vlmsieve import VideoSieve
+
+sieve = VideoSieve(
+    source="security_footage.mp4",
+    sample_fps=10.0,
+    pre_roll_sec=3.0,
+    merge_gap_sec=6.0,
+    tile_max_dim=640,
+    suppress_disturbances=True,
+)
+
+events = sieve.process_video_to_dir("./sieve_output")
+report = sieve.get_savings_report()
+
+for ev in events:
+    print(
+        f"Event {ev.event_id}: {ev.start_time_sec:.2f}s - {ev.end_time_sec:.2f}s | "
+        f"Keyframes: {ev.keyframe_times_sec} | Size: {ev.storyboard_pil.size}"
+    )
+```
+
+---
+
+## Command-Line Interface (CLI)
+
+```bash
+# Default Gemini profile
+vlmsieve ./input_video.mp4 -o ./sieve_output --pre-roll-sec 3.5 --merge-gap-sec 6.0
+
+# Qwen2.5-VL profile (448px tiles, 28px patch-aligned, adaptive grid, outer-border axis ticks)
+vlmsieve ./input_video.mp4 -o ./sieve_output_qwen --target-vlm qwen-vl
+
+# Compact 3B/7B local profile (336px tiles, 28px patch-aligned, adaptive grid, outer-border axis ticks)
+vlmsieve ./input_video.mp4 -o ./sieve_output_7b --target-vlm local-7b
+
+# Run as a Python module
+python -m vlmsieve ./input_video.mp4 -o ./sieve_output --target-vlm gpt-4o
+```
+
+---
+
+## License
+
+MIT License

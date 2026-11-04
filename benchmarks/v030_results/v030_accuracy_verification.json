@@ -1,0 +1,18 @@
+{
+  "Reddit_Mod_Breaks_Into_Neighbors_Home_Full_Original_Unedited_Ring_Security_Footage_No_Commentary": {
+    "v030_local_7b": {
+      "prompt_tokens": 4426,
+      "output_tokens": 380,
+      "latency_sec": 18.85,
+      "response_text": "1. **Tool/Object Identified:** An **ergonomic shovel / snow shovel** (featuring a curved metal shaft, a wide scoop blade, and a top D-grip/handle), brandished by the bearded man in Episode 2 (who retrieved it from or checked near the closet accessed in Episode 1).\n\n2. **Tiles and Coordinates Showing the Object Most Clearly:**\n   - **Episode 2, Tile #2 (+2.30s):** Blade at **B2\u2013B3 / C2\u2013C3**, curved handle at **A2 / B1\u2013B2**.\n   - **Episode 2, Tile #3 (+17.90s):** Blade at **B3 / C3**, shaft/handle at **A2 / B2**.\n   - **Episode 2, Tile #4 (+22.60s):** Blade at **B3 / C2\u2013C3**.\n   - **Episode 2, Tile #5 (+32.50s):** Scoop blade at **C2 / D2**, curved shaft at **B1\u2013B2**.\n\n3. **Summary of Sequence of Events:**\n   - **Episode 1:** A resident wearing glasses and a long dark robe/coat emerges from the living area, opens and inspects a hallway closet, and then returns through the hallway.\n   - **Episode 2:** A bearded man in a sleeveless dark t-shirt stands near the doorway brandishing an ergonomic snow shovel over his shoulder while looking around the apartment.\n   - **Episode 3:** Armed police officers enter the residence to respond to the incident, clearing and inspecting the hallway and rear rooms.\n   - **Episode 4:** Multiple police officers complete their search/sweep of the apartment rooms and file out toward the front entrance."
+    }
+  },
+  "Vivint Doorbell Camera Pro \u2013 Sample Footage (Front Door Daytime Visitor)": {
+    "v030_local_7b": {
+      "prompt_tokens": 1205,
+      "output_tokens": 153,
+      "latency_sec": 8.53,
+      "response_text": "1. **Yes**, in **Tile #3 (+6.67s)**.\n2. **C2 / D2** (reaching directly towards the camera from C3).\n3. **Appearance & Action Sequence:**\n   - **Appearance:** Tall, slender adult male with short dark hair, a beard/facial hair, wearing a light blue/grey short-sleeve shirt, blue jeans, and brown shoes.\n   - **Action Sequence:** He approaches up the front walkway onto the porch (#1\u2013#2), reaches forward with his right hand to press the doorbell (#3), steps back onto the porch walkway and waits with hands in his pockets (#4), turns around (#5), and walks away down the path (#6)."
+    }
+  }
+}
